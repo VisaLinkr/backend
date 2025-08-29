@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FastAPI Google 로그인 테스트</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          sans-serif;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        margin: 0;
+        background-color: #f0f2f5;
+      }
+      .container {
+        background: white;
+        padding: 40px;
+        border-radius: 12px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+        text-align: center;
+        min-width: 300px;
+      }
+      .login-btn {
+        display: inline-block;
+        background: #4285f4;
+        color: white;
+        border: none;
+        padding: 12px 24px;
+        font-size: 16px;
+        border-radius: 8px;
+        cursor: pointer;
+        text-decoration: none;
+        transition: background-color 0.3s;
+      }
+      .login-btn:hover {
+        background: #357ae8;
+      }
+      #user-info {
+        margin-top: 20px;
+        text-align: left;
+        display: flex;
+        align-items: center;
+      }
+      #user-info img {
+        border-radius: 50%;
+        width: 60px;
+        height: 60px;
+        margin-right: 15px;
+      }
+      #user-info p {
+        margin: 5px 0;
+      }
+      #logout-btn {
+        background: #db4437;
+        margin-top: 20px;
+      }
+      #logout-btn[disabled] {
+        opacity: 0.7;
+        cursor: not-allowed;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>FastAPI Google 로그인</h1>
+      <div id="login-section">
+        <p>로그인하여 서비스를 이용하세요.</p>
+        <a href="/auth/login/google" class="login-btn">Google로 로그인</a>
+      </div>
+
+      <div id="user-info-section" style="display: none">
+        <h2>로그인 성공!</h2>
+        <div id="user-info"></div>
+        <button id="logout-btn" class="login-btn">로그아웃</button>
+      </div>
+    </div>
+
+    <script>
+      // 필요 시 API 베이스 분리(프론트/백 분리 배포하면 이 값만 바꾸세요)
+      const API_BASE = ""; // 같은 도메인/포트면 빈 문자열. 예: "https://api.visalinkr.kro.kr:7770"
+
+      window.onload = async () => {
+        const loginSection = document.getElementById("login-section");
+        const userInfoSection = document.getElementById("user-info-section");
+        const userInfoDiv = document.getElementById("user-info");
+        const logoutBtn = document.getElementById("logout-btn");
+
+        try {
+          // 쿠키 인증을 위해 credentials: 'include'
+          const response = await fetch(`${API_BASE}/auth/users/me`, {
+            credentials: "include",
+          });
+
+          if (response.ok) {
+            const user = await response.json();
+            userInfoDiv.innerHTML = `
+              <img src="${
+                user.picture ?? ""
+              }" alt="Profile Picture" onerror="this.style.display='none'">
+              <span>
+                <p><strong>이름:</strong> ${user.name ?? ""}</p>
+                <p><strong>이메일:</strong> ${user.email ?? ""}</p>
+              </span>
+            `;
+            loginSection.style.display = "none";
+            userInfoSection.style.display = "block";
+          } else {
+            loginSection.style.display = "block";
+            userInfoSection.style.display = "none";
+          }
+        } catch (error) {
+          console.error("사용자 정보 가져오기 실패:", error);
+          loginSection.style.display = "block";
+          userInfoSection.style.display = "none";
+        }
+
+        // 로그아웃
+        logoutBtn.onclick = async () => {
+          logoutBtn.disabled = true;
+          logoutBtn.textContent = "로그아웃 중...";
+          try {
+            // 서버에서 HttpOnly 쿠키 삭제
+            const res = await fetch(`${API_BASE}/auth/logout`, {
+              method: "POST", // 서버가 GET/POST 둘 다 지원하면 POST 권장
+              credentials: "include", // 크로스사이트/서브도메인 대비
+            });
+
+            // 200/302 모두 성공으로 간주, 최종적으로 새로고침
+            if (res.ok || res.status === 302) {
+              // 서버가 302로 / 로 보낼 수도 있으므로, 그냥 새로고침
+              window.location.reload();
+            } else {
+              console.warn("로그아웃 응답 비정상:", res.status);
+              window.location.reload();
+            }
+          } catch (e) {
+            console.error("로그아웃 실패:", e);
+            window.location.reload();
+          }
+        };
+      };
+    </script>
+  </body>
+</html>
