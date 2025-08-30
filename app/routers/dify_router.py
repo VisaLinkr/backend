@@ -39,6 +39,43 @@ if not DIFY_API_KEY:
     
 KST = timezone(timedelta(hours=9))
 
+def _norm_lang(lang: Optional[str]) -> str:
+    """
+    입력 언어 코드/별칭을 한글 명칭으로 정규화해서 반환.
+    - 예: en/en-US/en-GB -> "영어", ko/kr/ko-KR -> "한국어"
+    - 미지정/알 수 없는 값이면 기본 "한국어"
+    """
+    if not lang:
+        return "한국어"
+
+    v = lang.strip().lower()
+
+    # 대표 매핑
+    direct = {
+        "ko": "한국어", "kr": "한국어", "ko-kr": "한국어",
+        "en": "영어", "en-us": "영어", "en-gb": "영어", "en-au": "영어", "en-ca": "영어",
+        "ja": "일본어", "jp": "일본어",
+        "zh": "중국어", "zh-cn": "중국어(간체)", "zh-sg": "중국어(간체)", "zh-hans": "중국어(간체)",
+        "vi": "베트남어", "vi-vn": "베트남어",
+    }
+    if v in direct:
+        return direct[v]
+
+    # 언더/하이픈 섞여 온 경우도 처리: 예) EN_us, zh_Hant → 소문자-하이픈으로 맞추고 재시도
+    v_norm = v.replace("_", "-")
+    if v_norm in direct:
+        return direct[v_norm]
+
+    # 접두어만 들어온 경우(예: en-XX) 영어권/중국어권 등 묶어서 처리
+    if v_norm.startswith("en-"):
+        return "영어"
+    if v_norm.startswith("zh-"):
+        # 간체/번체가 불명확하면 상위 개념
+        return "중국어"
+
+    # 모르면 기본 한국어
+    return "한국어"
+
 def _full_age(birth: date, today: Optional[date] = None) -> int:
     """
     만나이 계산: 올해 - 출생연도 - (생일 아직 안 지났으면 1)
@@ -107,7 +144,7 @@ def _yn_ko(v: Optional[str]) -> str:
 
 def build_query_from_applicant(a: models.Applicant) -> str:
     parts = []
-    parts.append(f"{a.last_name_en} {a.first_name_en}")
+    parts.append(f"이름 {a.last_name_en} {a.first_name_en}")  # ← 이름임을 명시
     parts.append(_gender_ko(a.gender))
     parts.append(f"국적 {a.nationality}")
 
@@ -121,16 +158,16 @@ def build_query_from_applicant(a: models.Applicant) -> str:
 
     if a.education_level:
         parts.append(f"학력 {a.education_level}")
-    if a.has_korean_certificate is not None:
-        parts.append(f"한국어능력시험 보유 {_yn_ko(a.has_korean_certificate)}")
+    # if a.has_korean_certificate is not None:
+    #     parts.append(f"한국어능력시험 보유 {_yn_ko(a.has_korean_certificate)}")
     if a.korean_certificate_score:
         parts.append(f"점수 {a.korean_certificate_score}")
     if a.korean_certificate_type:
         parts.append(f"등급 {a.korean_certificate_type}")
-    if a.korean_level:
-        parts.append(f"한국어 사용 수준 {a.korean_level}")
-    if a.korean_speaking_level:
-        parts.append(f"한국어 구사 수준 {a.korean_speaking_level}")
+    # if a.korean_level:
+    #     parts.append(f"한국어 사용 수준 {a.korean_level}")
+    # if a.korean_speaking_level:
+    #     parts.append(f"한국어 구사 수준 {a.korean_speaking_level}")
     if a.desired_industry:
         parts.append(f"{a.desired_industry} 업무 희망")
     if a.visa_status:
@@ -343,43 +380,42 @@ async def _call_dify_and_log(db: Session, user_id: int, query: str) -> dict:
 async def diagnose_with_saved_applicant(
     request: Request,
     db: Session = Depends(get_db),
+    lang: str = "ko",                     # ← 프론트에서 ?lang=en 같이 전달
 ):
-    """
-    바디 없음. (유저당 Applicant 하나라는 가정)
-    - 로그인 쿠키로 user_id 식별
-    - 해당 user_id의 Applicant 1건을 로드
-    - 질의문 생성 → Dify 호출/ai_logs 저장 → 저장된 값만 반환
-    """
     user_id = _get_current_user_id_from_cookie(request, db)
-
-    a = db.query(models.Applicant).filter(models.Applicant.user_id == user_id).order_by(
-        models.Applicant.applicant_id.desc()
-    ).first()
+    a = db.query(models.Applicant)\
+          .filter(models.Applicant.user_id == user_id)\
+          .order_by(models.Applicant.applicant_id.desc())\
+          .first()
     if not a:
         raise HTTPException(status_code=404, detail="No applicant found for this user")
 
     query = build_query_from_applicant(a)
+
+    # ✅ Dify가 해당 언어로 답하도록 쿼리 앞에 지시문 삽입
+    lang_norm = _norm_lang(lang)
+    query = f"{lang_norm}@ {query}"
+
     return await _call_dify_and_log(db, user_id, query)
 
 @router.post("/diagnose/roadmap")
 async def diagnose_with_saved_applicant(
     request: Request,
     db: Session = Depends(get_db),
+    lang: str = "ko",
 ):
-    """
-    바디 없음. (유저당 Applicant 하나라는 가정)
-    - 로그인 쿠키로 user_id 식별
-    - 해당 user_id의 Applicant 1건을 로드
-    - 질의문 생성 → Dify 호출/ai_logs 저장 → 저장된 값만 반환
-    """
     user_id = _get_current_user_id_from_cookie(request, db)
-
-    a = db.query(models.Applicant).filter(models.Applicant.user_id == user_id).order_by(
-        models.Applicant.applicant_id.desc()
-    ).first()
+    a = db.query(models.Applicant)\
+          .filter(models.Applicant.user_id == user_id)\
+          .order_by(models.Applicant.applicant_id.desc())\
+          .first()
     if not a:
         raise HTTPException(status_code=404, detail="No applicant found for this user")
 
-    query = build_query_from_applicant(a)
-    query = "[정착 로드맵 질문]" + query
+    base = build_query_from_applicant(a)
+
+    lang_norm = _norm_lang(lang)
+    # ✅ 로드맵 태그 + 언어 지시문을 함께 붙임
+    query = f"{lang_norm}@ [정착 로드맵 질문] {base}"
+
     return await _call_dify_and_log(db, user_id, query)
