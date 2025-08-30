@@ -1,35 +1,64 @@
 # app/routers/applicant_router.py
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import text
-from typing import List
-from json import dumps
+from typing import List, Optional
 
 from app.database import get_db
 from app.models.models import Applicant, User
 from app.schemas.applicant import ApplicantCreate, ApplicantOut, VisaInfoAppend
 from app.dependencies.current_user import get_current_user
-#from app.models import models  # User 모델
 
 router = APIRouter(prefix="/applicants", tags=["Applicants"])
 
+def _clean_str_or_none(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return None
+    v2 = v.strip()
+    return v2 if v2 else None
+
+def _clean_list_str(items: Optional[List[str]]) -> List[str]:
+    if not items:
+        return []
+    return [s.strip() for s in items if isinstance(s, str) and s.strip()]
+
 @router.post("/", response_model=ApplicantOut)
-def create_applicant(
+def upsert_applicant(
     payload: ApplicantCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # ORM 방식: JSONB 컬럼은 list로 그대로 넣으면 dialect가 json으로 처리
-    obj = Applicant(
-        user_id=current_user.id,
-        last_name_en=payload.last_name_en,
-        first_name_en=payload.first_name_en,
-        birth_date=payload.birth_date,
-        gender=payload.gender,
-        nationality=payload.nationality,
-        residence_region=payload.residence_region,
-        visa_info=payload.visa_info or [],
+    # 동일 user_id의 가장 최근 1건을 업데이트, 없으면 생성
+    obj = (
+        db.query(Applicant)
+        .filter(Applicant.user_id == current_user.id)
+        .order_by(Applicant.applicant_id.desc())
+        .first()
     )
+    if obj is None:
+        obj = Applicant(user_id=current_user.id)
+
+    # 필수
+    obj.last_name_en   = payload.last_name_en
+    obj.first_name_en  = payload.first_name_en
+    obj.birth_date     = payload.birth_date
+    obj.gender         = payload.gender if isinstance(payload.gender, str) else str(payload.gender)
+    obj.nationality    = payload.nationality
+
+    # 선택
+    obj.desired_industry          = _clean_str_or_none(payload.desired_industry)
+    obj.education_level           = _clean_str_or_none(payload.education_level)
+    obj.has_korean_certificate    = _clean_str_or_none(payload.has_korean_certificate)
+    obj.korean_certificate_score  = _clean_str_or_none(payload.korean_certificate_score)
+    obj.korean_certificate_type   = _clean_str_or_none(payload.korean_certificate_type)
+    obj.korean_level              = _clean_str_or_none(payload.korean_level)
+    obj.korean_speaking_level     = _clean_str_or_none(payload.korean_speaking_level)
+    obj.visa_code                 = _clean_str_or_none(payload.visa_code)
+    obj.visa_label                = _clean_str_or_none(payload.visa_label)
+    obj.visa_status               = _clean_str_or_none(payload.visa_status)
+
+    # JSONB 리스트(빈 문자열 제거)
+    obj.visa_info = _clean_list_str(payload.visa_info)
+
     db.add(obj)
     db.commit()
     db.refresh(obj)
@@ -40,13 +69,12 @@ def list_my_applicants(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    rows = (
+    return (
         db.query(Applicant)
         .filter(Applicant.user_id == current_user.id)
         .order_by(Applicant.applicant_id.desc())
         .all()
     )
-    return rows
 
 @router.patch("/{applicant_id}/visa-info", response_model=ApplicantOut)
 def append_visa_info(
@@ -55,7 +83,6 @@ def append_visa_info(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # 본인 소유 레코드인지 확인
     target = (
         db.query(Applicant)
         .filter(Applicant.applicant_id == applicant_id, Applicant.user_id == current_user.id)
@@ -64,19 +91,26 @@ def append_visa_info(
     if not target:
         raise HTTPException(status_code=404, detail="Applicant not found")
 
-    if not payload.items:
-        return target  # 추가할 항목 없으면 그대로 반환
+    items = _clean_list_str(payload.items)
+    if not items:
+        return target
 
-    # JSONB append: visa_info = visa_info || :arr::jsonb
-    # SQLAlchemy text로 안전하게 바인딩
+    from sqlalchemy import text
+    from json import dumps
     stmt = text("""
         UPDATE applicants
-        SET visa_info = visa_info || :arr::jsonb
-        WHERE applicant_id = :aid AND user_id = :uid
-        RETURNING applicant_id, user_id, last_name_en, first_name_en, birth_date,
-                  gender, nationality, residence_region, visa_info, created_at
+           SET visa_info = COALESCE(visa_info, '[]'::jsonb) || :arr::jsonb
+         WHERE applicant_id = :aid AND user_id = :uid
+     RETURNING applicant_id, user_id, last_name_en, first_name_en, birth_date,
+               gender, nationality,
+               desired_industry, education_level,
+               has_korean_certificate, korean_certificate_score, korean_certificate_type,
+               korean_level, korean_speaking_level, visa_code, visa_label, visa_status,
+               visa_info, created_at
     """)
-    row = db.execute(stmt, {"arr": dumps(payload.items), "aid": applicant_id, "uid": current_user.id}).mappings().first()
+    row = db.execute(
+        stmt, {"arr": dumps(items), "aid": applicant_id, "uid": current_user.id}
+    ).mappings().first()
     db.commit()
     if not row:
         raise HTTPException(status_code=500, detail="Failed to update visa_info")

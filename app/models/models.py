@@ -35,6 +35,7 @@ class District(Base):
     # 관계
     province = relationship("Province", back_populates="districts")
     
+
 class Applicant(Base):
     __tablename__ = "applicants"
 
@@ -46,17 +47,29 @@ class Applicant(Base):
     birth_date        = Column(Date, nullable=False)
     gender = Column(String(10), nullable=False)           # ex) 'M' / 'F' (검증은 스키마에서)
     nationality       = Column(String(100), nullable=False)
-    residence_region  = Column(String(150), nullable=False)
+    
+    desired_industry          = Column(String(100), nullable=True)
+    education_level           = Column(String(50),  nullable=True)
+    has_korean_certificate    = Column(String(10),  nullable=True)   # 'yes'/'no'
+    korean_certificate_score  = Column(String(20),  nullable=True)
+    korean_certificate_type   = Column(String(20),  nullable=True)
+    korean_level              = Column(String(20),  nullable=True)
+    korean_speaking_level     = Column(String(20),  nullable=True)
+    visa_code                 = Column(String(20),  nullable=True)
+    visa_label                = Column(String(100), nullable=True)
+    visa_status               = Column(String(20),  nullable=True)
 
     # ✅ 비자 정보 문자열 리스트(JSONB)
     visa_info         = Column(JSONB, nullable=False, server_default="'[]'::jsonb")
     created_at        = Column(TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(KST))
     
+
 class AiLog(Base):
     __tablename__ = "ai_logs"
 
     log_id = Column(BigInteger, primary_key=True, index=True)
     user_id   = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    query      = Column(Text, nullable=False) 
     answer = Column(Text, nullable=False)
     usage = Column(JSONB, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(KST))
