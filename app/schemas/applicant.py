@@ -1,4 +1,3 @@
-# app/schemas/applicant.py
 from pydantic import BaseModel, Field
 from datetime import date, datetime
 from typing import Optional, List, Literal
@@ -13,7 +12,7 @@ class ApplicantCreate(BaseModel):
 
     # gender 한 글자(M/F)만 강제하던 것 → 완화
     # 필요하다면 Literal로 제한하거나, 자유 텍스트(예: "male", "female")도 허용
-    gender: Literal["M", "F", "male", "female"] = Field(..., description="성별: M/F 또는 male/female")
+    gender: str
     nationality: str
 
     # ✅ 확장 필드들(모두 선택)
