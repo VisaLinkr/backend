@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.routers import auth_router, province_router
+from app.routers import auth_router, province_router, applicant_router, dify_router
 
 app = FastAPI()
 
@@ -21,6 +21,8 @@ def mount_if_exists(url_path: str, subdir: str):
 # 1) ✅ 먼저 인증/백엔드 라우터를 등록 ( /auth/* )
 app.include_router(auth_router.router)
 app.include_router(province_router.router)
+app.include_router(applicant_router.router)
+app.include_router(dify_router.router)
 
 # 2) 정적 폴더 마운트
 mount_if_exists("/_next", "_next")
