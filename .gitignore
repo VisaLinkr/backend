@@ -2,3 +2,6 @@
 .env
 **/__pycache__
 daewook.sh
+districts_data.csv
+insert_db.py
+/out

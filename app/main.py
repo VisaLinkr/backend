@@ -1,39 +1,68 @@
-from fastapi import FastAPI, Request
+import os
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 
-# app/routers/auth_router.py 파일에서 'router' 객체를 가져와 'auth_router'라는 이름으로 사용합니다.
-from app.routers.auth_router import router as auth_router
+from app.routers import auth_router, province_router
 
 app = FastAPI()
 
-# --- CORS 설정 ---
-# 프론트엔드 개발 서버의 주소를 origins 목록에 추가합니다.
-origins = [
-    "http://localhost:5173",
-    # 필요에 따라 다른 출처(도메인)를 추가할 수 있습니다.
-]
+FRONTEND_DIR = os.getenv("FRONTEND_DIR", "/home/visalinkr/backend/out")
 
+def mount_if_exists(url_path: str, subdir: str):
+    path = os.path.join(FRONTEND_DIR, subdir)
+    if os.path.isdir(path):
+        app.mount(url_path, StaticFiles(directory=path), name=subdir)
+        print(f"[FE] Mounted {url_path} -> {path}")
+    else:
+        print(f"[FE][WARN] Skip mount: {path} not found")
+
+# 1) ✅ 먼저 인증/백엔드 라우터를 등록 ( /auth/* )
+app.include_router(auth_router.router)
+app.include_router(province_router.router)
+
+# 2) 정적 폴더 마운트
+mount_if_exists("/_next", "_next")
+mount_if_exists("/assets", "assets")
+mount_if_exists("/static", "static")
+
+# 3) CORS (동일 오리진이면 사실 필요 없음)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,       # 쿠키를 포함한 요청을 허용
-    allow_methods=["*"],          # 모든 HTTP 메서드 허용
-    allow_headers=["*"],          # 모든 HTTP 헤더 허용
+    allow_origins=[
+        "http://www.visalinkr.kro.kr:7770",   # 지금 7770에서 직접 서빙이면 포트 포함
+        "http://www.visalinkr.kro.kr",        # Nginx로 80에서 서빙할 경우 대비
+        "http://localhost:3000",              # 로컬 개발용
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-# 'static' 폴더를 정적 파일 디렉터리로 마운트합니다.
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
-# Jinja2 템플릿 설정
-templates = Jinja2Templates(directory="static")
-
-# 인증 라우터를 앱에 포함합니다.
-app.include_router(auth_router)
-
-# 루트 URL('/')에 대한 GET 요청을 처리하여 index.html을 렌더링합니다.
+# 4) ✅ SPA 폴백은 맨 마지막! ( /auth/* 를 덮지 않도록 )
 @app.get("/", response_class=HTMLResponse)
-async def read_root(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+async def root():
+    index_path = os.path.join(FRONTEND_DIR, "index.html")
+    if os.path.isfile(index_path):
+        return FileResponse(index_path)
+    return HTMLResponse("<h1>index.html not found</h1>", status_code=404)
+
+@app.get("/{full_path:path}", response_class=HTMLResponse)
+async def spa(full_path: str):
+    # 요청 파일이 존재하면 그대로 제공
+    candidate = os.path.join(FRONTEND_DIR, full_path)
+    if os.path.isfile(candidate):
+        return FileResponse(candidate)
+
+    # 디렉토리 index.html
+    index_html = os.path.join(candidate, "index.html")
+    if os.path.isfile(index_html):
+        return FileResponse(index_html)
+
+    # 최종 폴백: 루트 index.html
+    root_index = os.path.join(FRONTEND_DIR, "index.html")
+    if os.path.isfile(root_index):
+        return FileResponse(root_index)
+
+    return HTMLResponse("<h1>index.html not found</h1>", status_code=404)
